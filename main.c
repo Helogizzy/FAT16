@@ -1,7 +1,6 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<locale.h>
-//include<math.h>
 
 typedef struct fat_BS{
     unsigned char bootjmp[3];
@@ -33,7 +32,7 @@ void print_arq();
 int verifica();
 
 int main(){
-    //função para printar acento no vscode
+    //função para mostrar acentuação no vscode
     setlocale(LC_ALL, "Portuguese_Brasil");
     system("chcp 65001> nul");
 
@@ -42,7 +41,8 @@ int main(){
     char nome_arq[100], escolha[25];
     unsigned short *fat;
     unsigned char *dir_raiz, current_entry[32];
-    int size, cluster, entry_count=0, pos=0, procura=0;
+    unsigned int root, data;
+    int root_dir_sectors,size, cluster, cont_entradas=0, pos=0, procura=0,bytes_cluster, num;
 
     printf("Digite o nome do arquivo: ");
     scanf("%s", nome_arq);
@@ -57,11 +57,13 @@ int main(){
     fread(&boot_record, sizeof(fat_BS_t), 1, fp);
 
     //cálculo do nº de setores para o diretório raiz
-    int root_dir_sectors = boot_record.root_entry_count * 32 / boot_record.bytes_per_sector;
+    root_dir_sectors = boot_record.root_entry_count * 32 / boot_record.bytes_per_sector;
     //cálculo da posição dos setores do diretório raiz
-    unsigned int root = boot_record.reserved_sector_count + (boot_record.table_count * boot_record.table_size_16);
+    root = boot_record.reserved_sector_count + (boot_record.table_count * boot_record.table_size_16);
     //cálculo dos setores da área de dados
-    unsigned int data = root + (boot_record.root_entry_count * 32 / boot_record.bytes_per_sector);
+    data = root + (boot_record.root_entry_count * 32 / boot_record.bytes_per_sector);
+    info_arq_t *arquivos = malloc(sizeof(info_arq_t) * root_dir_sectors);
+    info_arq_t file;
 
     printf("\n========================FAT 16========================\n");
     printf("\nNúmero de fat's: %4x\n", boot_record.table_count);
@@ -84,24 +86,21 @@ int main(){
     fseek(fp, boot_record.reserved_sector_count * boot_record.bytes_per_sector + (boot_record.table_count * boot_record.table_size_16 * boot_record.bytes_per_sector), SEEK_SET);
     fread(dir_raiz, root_dir_sectors * 32, 1, fp); 
 
-    info_arq_t *arquivos = malloc(sizeof(info_arq_t) * root_dir_sectors);
-    info_arq_t file;
+    while(cont_entradas < boot_record.root_entry_count){ //percorre as entradas do diretório raiz
+        if(dir_raiz[cont_entradas * 32] == 0x00) break; //verifica se a entrada é vazia
 
-    while(entry_count < boot_record.root_entry_count){
-        if(dir_raiz[entry_count * 32] == 0x00) break; //verifica se a entrada é vazia
-
-        if(dir_raiz[entry_count * 32] == 0xE5){ //verifica se a entrada ta marcada como excluida
-            entry_count++;
+        if(dir_raiz[cont_entradas * 32] == 0xE5){ //verifica se a entrada ta marcada como excluida
+            cont_entradas++;
             continue;
         }
 
-        if(dir_raiz[(entry_count * 32) + 11] == 0x0F){ //verifica se o valor da entrada 11 é long fitamame
-            entry_count++;
+        if(dir_raiz[(cont_entradas * 32) + 11] == 0x0F){ //verifica se o valor da entrada 11 é long fitamame
+            cont_entradas++;
             continue;
         }
 
         for(int j=0; j<32; j++){ //cópia dos 32bytes do diretorio raiz
-            current_entry[j] = dir_raiz[j + (entry_count * 32)];
+            current_entry[j] = dir_raiz[j + (cont_entradas * 32)];
         }
 
         //Verifica se é um diretório (10) ou arquivo (20)
@@ -125,12 +124,12 @@ int main(){
         file.first_cluster = cluster; //salva o 1º cluster
         arquivos[pos] = file; //salva os dados da struct no vetor
         pos++; //prox posição do vetor
-        entry_count++; //prox entrada
+        cont_entradas++; //prox entrada
     }
 
     printf("==================================================\n\n");
     for(int k=0; k<pos; k++){
-        printf("[%d] ", k);
+        printf("[%d] - ", k);
         print_arq(arquivos[k]);
     }
 
@@ -159,13 +158,13 @@ int main(){
     print_arq(file);
 
     //calculo do Nº de cluster para salvar o arquivo
-    int n = (file.size / boot_record.bytes_per_sector) + 1;
+    num = (file.size / boot_record.bytes_per_sector) + 1;
     //guarda os números de clustes que o arquivo usa
-    int file_clusters[n];
+    int file_clusters[num];
     int clusters = 1;
     file_clusters[0] = file.first_cluster;
 
-    for(int i=0; i<n; i++){
+    for(int i=0; i<num; i++){
         //mapeia os cluster do arquivo com a tabela fat
         file_clusters[i + 1] = fat[file_clusters[i]];
         //verifica o valor da tabela
@@ -175,33 +174,33 @@ int main(){
     }
 
     //calculo do tamanho em bytes de um cluster
-    int bytes_per_cluster = boot_record.sectors_per_cluster * boot_record.bytes_per_sector;
+    bytes_cluster = boot_record.sectors_per_cluster * boot_record.bytes_per_sector;
     if(file.file_type == 0x10){
-        unsigned char DATA[bytes_per_cluster];
+        unsigned char dados[bytes_cluster];
 
         //pega o inicio do cluster
         fseek(fp, (data + ((file_clusters[0] - 2) * boot_record.sectors_per_cluster)) * boot_record.bytes_per_sector, SEEK_SET);
-        fread(&DATA, bytes_per_cluster, 1, fp);
+        fread(&dados, bytes_cluster, 1, fp);
         
         info_arq_t dir_file;
-        entry_count = 0;
+        cont_entradas = 0;
 
-        //para acessar o subisiretório
-        while(entry_count < bytes_per_cluster / 32){
-            if(DATA[entry_count * 32] == 0x00) break; //verifica se é vazio
+        //para acessar o subdiretório
+        while(cont_entradas < bytes_cluster / 32){
+            if(dados[cont_entradas * 32] == 0x00) break; //verifica se é vazio
 
-            if(DATA[entry_count * 32] == 0xE5){ //verifica se ta marcado como excluido
-                entry_count++;
+            if(dados[cont_entradas * 32] == 0xE5){ //verifica se ta marcado como excluido
+                cont_entradas++;
                 continue;
             }
 
-            if(DATA[(entry_count * 32) + 11] == 0x0F){ //verifica se é long fitamame
-                entry_count++;
+            if(dados[(cont_entradas * 32) + 11] == 0x0F){ //verifica se é long fitamame
+                cont_entradas++;
                 continue;
             }
 
             for(int j=0; j<32; j++){ //armazena os dados da entrada
-                current_entry[j] = DATA[j + (entry_count * 32)];
+                current_entry[j] = dados[j + (cont_entradas * 32)];
             }
 
             //Verifica se é um diretório (10) ou arquivo (20)
@@ -223,36 +222,37 @@ int main(){
             dir_file.file_type = current_entry[11]; //salva o tipo: arq ou dir
             dir_file.size = size; //salva o tamanho
             dir_file.first_cluster = cluster; //salva o 1º cluster
-            print_arq(dir_file); //printa os arquivos
-            entry_count++; //prox entrada
+            print_arq(dir_file); //printa
+            cont_entradas++; //prox entrada
         }
     } //fim subdiretório
 
     else if(file.file_type == 0x20) //caso seja um arquivo
     {
-        unsigned char DATA[file.size];
+        unsigned char dados[file.size];
         //clusters do arquivo
         for (int i=0; i<clusters; i++){
             //pega o inicio do cluster
             fseek(fp, (data + ((file_clusters[i] - 2) * boot_record.sectors_per_cluster)) * boot_record.bytes_per_sector, SEEK_SET);
             //caluclo do Nº de bytes lidos
-            int num_bytes = i * bytes_per_cluster;
+            int num_bytes = i * bytes_cluster;
 
             if (i == clusters - 1){ //verifica se é o último cluster
                 //lê os dados do arquivo do cluster
-                fread(&DATA[num_bytes], file.size - (num_bytes), 1, fp);
+                fread(&dados[num_bytes], file.size - (num_bytes), 1, fp);
             }
             else //se for o último cluster lê o resto dos bytes
-                fread(&DATA[num_bytes], bytes_per_cluster, 1, fp);
+                fread(&dados[num_bytes], bytes_cluster, 1, fp);
         }
         printf("\n");
         for(int i=0; i<file.size; i++){
-            printf("%c", DATA[i]);
+            printf("%c", dados[i]);
         }
     } 
     free(dir_raiz);
     free(fat);
     fclose(fp);
+    return 0;
 }
 
 void print_arq(info_arq_t entry){
